@@ -1,0 +1,16 @@
+# Add project specific R8 rules here.
+# AGP will combine all keep rule files in src/main/keepRules to pass to R8
+#
+# For more details, see
+#   https://d.android.com/r/tools/r8/keep-rules
+
+# Shizuku starts this service in a separate process and reflects its constructors.
+-keep class com.largebatata.fcmhelper.wake.WeChatWakeUserService {
+    public <init>();
+    public <init>(android.content.Context);
+    public int startCoreService();
+    public void destroy();
+}
+
+# Preserve the small AIDL contract used across the Shizuku UserService binder.
+-keep class com.largebatata.fcmhelper.wake.IWeChatWakeService** { *; }

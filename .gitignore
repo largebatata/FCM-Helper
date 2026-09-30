@@ -1,0 +1,44 @@
+# Local IDE / SDK configuration and generated caches
+*.iml
+.idea/
+.gradle/
+.kotlin/
+**/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+.DS_Store
+local.properties
+
+# Signing keys and machine-bound / local credentials (never commit)
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.dpapi
+*.key
+signing.properties
+keystore.properties
+*.password*
+*.credentials*
+.env
+.env.*
+!.env.example
+
+# Local development snapshots, previews, device evidence and exports
+/stage-checkpoints/
+/phase1-backup-*/
+/README-phase1.md
+/branding-preview/
+*.log
+*.log.*
+/diagnostics/
+/evidence/
+shared-diagnostics/
+fcm-helper-diagnostics-*.txt
+
+# Distribute signed APKs as release attachments, not source files
+*.apk
+*.aab
+*.apks
+*.idsig

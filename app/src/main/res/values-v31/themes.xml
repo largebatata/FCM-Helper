@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.WeChatFCMHelper" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_symbol</item>
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:colorAccent">@color/brand_blue</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+    </style>
+
+    <style name="Theme.WeChatFCMHelper.Light" parent="Theme.WeChatFCMHelper">
+        <item name="android:windowSplashScreenBackground">@color/splash_background_light</item>
+        <item name="android:windowBackground">@color/splash_background_light</item>
+        <item name="android:navigationBarColor">@color/splash_background_light</item>
+        <item name="android:statusBarColor">@color/splash_background_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.WeChatFCMHelper.Dark" parent="Theme.WeChatFCMHelper">
+        <item name="android:windowSplashScreenBackground">@color/splash_background_dark</item>
+        <item name="android:windowBackground">@color/splash_background_dark</item>
+        <item name="android:navigationBarColor">@color/splash_background_dark</item>
+        <item name="android:statusBarColor">@color/splash_background_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
