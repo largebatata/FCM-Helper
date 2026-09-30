@@ -6,7 +6,7 @@ FCM Helper 是一个面向特定 Android、microG 和 Google Play 版微信环�
 
 ## 当前验证环境
 
-- HUAWEI Mate 70 RS（PLU-AL10）
+- HUAWEI 鸿蒙4.3系统手机
 - microG Services `0.3.16.252432-hw`
 - Google Play 版微信 `8.0.72`
 - Android `minSdk 31`，`targetSdk 37`
@@ -42,6 +42,32 @@ FCM Helper 是一个面向特定 Android、microG 和 Google Play 版微信环�
 
 从 Debug/RC 测试版升级前，先核对已安装 App 与正式版的签名。签名不同不能原地覆盖；卸载测试版会删除其本地设置、事件历史和诊断文件，详见[安装与升级说明](docs/setup.md)。
 
+## 日常使用
+
+完成首次设置并点击“开始监听”后，FCM Helper 会在后台等待 microG 接收到微信 FCM 推送。
+
+正常使用时不需要反复打开 FCM Helper。
+
+工作流程大致如下：
+
+1. microG 收到微信 FCM 推送。
+2. FCM Helper 从指定的 microG Logcat 中识别事件。
+3. 根据推送特征，将事件分类为：
+   - `MESSAGE`：普通微信消息
+   - `CALL`：微信语音或视频通话
+   - `PC_LOGIN`：电脑版微信登录请求
+   - `UNKNOWN`：暂时无法确定具体类型的微信 FCM 事件
+4. 手机处于解锁前台状态时，通过 Toast 提醒。
+5. 手机处于锁屏状态时，通过系统通知提醒。
+6. 点击事件通知后，FCM Helper 会尝试打开微信。
+7. 当 user 0 主微信进入前台后，相关 Helper 提醒会提前清除。
+
+如果华为系统中同时安装了主微信和微信分身，点击事件通知时系统可能弹出主微信/微信分身选择界面，这是系统 Launcher 的正常行为。
+
+FCM Helper 只负责补充“微信事件已经到达”的提醒，不读取或显示聊天正文，也不会读取微信聊天数据库。
+
+如果微信自身已经能够稳定、及时地显示通知，一般不需要依赖本项目。
+
 ## Shizuku 增强唤醒
 
 增强唤醒是实验性可选功能，默认关闭。它只在去重后的 `MESSAGE`、`CALL` 或 `PC_LOGIN` 事件到达时尝试唤醒 user 0 主微信，不处理 `UNKNOWN` 或 user 128 微信分身，也不会打开微信 Activity。
@@ -68,10 +94,18 @@ $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 
 最后一条命令要求 `ANDROID_HOME` 指向本机已有 SDK；也可直接传入实际 Build Tools 路径，不改变项目 `local.properties` 的 SDK。Release 构建启用 AGP 9.3 应用优化和资源裁剪。仓库不包含发布私钥或密码；[签名脚本](scripts/Sign-Release.ps1)默认只接受已有正式密钥，防止换电脑时无意生成新证书。密钥和经 Windows 用户账户加密的密码保存在项目外，后续版本必须沿用同一证书。跨电脑恢复需要现有密钥的独立备份及另外保管的恢复口令，不能只依赖 Windows DPAPI 文件。
 
+## 致谢
+
+FCM Helper 最初来自一个很简单的个人需求：让华为手机在 microG + Google Play 版微信环境下，也能够更可靠地知道微信消息什么时候到达。
+
+项目由我提出需求、设计实际使用场景、持续进行真机测试，并负责项目维护和最终发布。开发过程中，OpenAI 的 ChatGPT 和 Codex 参与了大量协作，包括需求讨论、方案设计、代码实现、日志分析、故障排查、测试检查、发布流程和文档整理。
+
+同时感谢 Android、microG、Shizuku、Kotlin 及相关开源社区提供的基础能力。
+
 ## License
 
 本项目使用 [Apache License 2.0](LICENSE)。
 
 ## 商标声明
 
-FCM Helper 是独立第三方开源项目，与 Tencent（腾讯）、WeChat（微信）、Google、microG、Huawei（华为）或 Shizuku 不存在官方隶属、授权或合作关系。相关名称仅用于客观描述兼容性和用途；微信及其他相关商标归各自权利人所有。本项目不提供这些第三方产品的官方支持。
+FCM Helper 是独立第三方开源项目，与 Tencent（腾讯）、WeChat（微信）、Google、microG、Huawei（华为）、Shizuku 或 OpenAI 不存在官方隶属、授权或合作关系。
