@@ -6,16 +6,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -32,15 +30,8 @@ import com.largebatata.fcmhelper.core.WeChatFcmEvent
 import com.largebatata.fcmhelper.core.WeChatFcmType
 import com.largebatata.fcmhelper.core.WeChatForegroundParser
 import com.largebatata.fcmhelper.wake.EnhancedWakeManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -93,22 +84,9 @@ class MonitorService : Service() {
     private var reader: LogcatReader? = null
     private var activityWatcher: SupervisedLineReader? = null
     private val alertPolicy = AlertNotificationPolicy()
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var unlockTimeoutJob: Job? = null
     private lateinit var diagnostics: ReaderDiagnostics
     private lateinit var listening: ListeningPreference
     @Volatile private var stopping = false
-    private var userPresentReceiverRegistered = false
-
-    private val userPresentReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != Intent.ACTION_USER_PRESENT || stopping) return
-            if (!alertPolicy.hasPending()) return
-            val locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
-            diagnostics.record("USER_PRESENT", mapOf("keyguardLocked" to locked.toString()))
-            applyAlertTransition(alertPolicy.onUserPresent(locked))
-        }
-    }
 
     private val pipeline = FcmPipeline(
         onEvent = { event ->
@@ -155,14 +133,6 @@ class MonitorService : Service() {
                 "channelImportance" to manager.getNotificationChannel(MONITOR_CHANNEL).importance.toString(),
             ),
         )
-        val userPresentFilter = IntentFilter(Intent.ACTION_USER_PRESENT)
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(userPresentReceiver, userPresentFilter, RECEIVER_EXPORTED)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            registerReceiver(userPresentReceiver, userPresentFilter)
-        }
-        userPresentReceiverRegistered = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -313,26 +283,28 @@ class MonitorService : Service() {
                 WeChatFcmType.MESSAGE, WeChatFcmType.UNKNOWN -> "微信有新消息"
             }
             val manager = getSystemService(NotificationManager::class.java)
-            if (call) removeAlert(HelperNotificationIds.MESSAGE_NOTIFICATION_ID, cancelNotification = true)
-            if (!getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
-                clearAlertNotifications()
+            val interactive = getSystemService(PowerManager::class.java).isInteractive
+            val locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
+            if (interactive && !locked) {
+                applyAlertTransition(alertPolicy.onReminder(event.type, notificationPosted = false))
                 Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
             } else if (Build.VERSION.SDK_INT < 33 ||
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
             ) {
+                if (call) removeAlert(HelperNotificationIds.MESSAGE_NOTIFICATION_ID, cancelNotification = true)
                 val notification = NotificationCompat.Builder(this, if (call) CALL_CHANNEL else MESSAGE_CHANNEL)
                     .setSmallIcon(R.drawable.ic_stat_wechat_fcm)
                     .setContentTitle(text)
                     .setContentText(if (call) "基于 FCM 特征识别" else "请打开微信查看")
                     .setContentIntent(openWeChat())
                     .setDeleteIntent(alertDismissed(HelperNotificationIds.forType(event.type)))
-                    .setAutoCancel(true)
+                    .setAutoCancel(false)
                     .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                     .setPriority(if (call) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
                     .build()
                 val notificationId = HelperNotificationIds.forType(event.type)
                 manager.notify(notificationId, notification)
-                applyAlertTransition(alertPolicy.onPosted(event.type))
+                applyAlertTransition(alertPolicy.onReminder(event.type, notificationPosted = true))
             }
         }
     }
@@ -342,10 +314,8 @@ class MonitorService : Service() {
         transition.cancelIds.forEach {
             manager.cancel(it)
         }
-        if (transition.cancelUnlockTimeout) cancelUnlockTimeout()
         if (transition.stopWatcher) stopActivityWatcher()
         if (transition.startWatcher) startActivityWatcher()
-        if (transition.startUnlockTimeout) startUnlockTimeout()
     }
 
     private fun startActivityWatcher() {
@@ -365,12 +335,20 @@ class MonitorService : Service() {
                 if (activity != null && activity.timestampMillis >= startedAt &&
                     WeChatForegroundParser.isMainWeChat(activity)
                 ) {
-                    diagnostics.record(
-                        "MAIN_WECHAT_FOREGROUND",
-                        mapOf("source" to activity.sourceType.name),
-                    )
+                    val interactiveAtEvent = getSystemService(PowerManager::class.java).isInteractive
+                    val lockedAtEvent = getSystemService(KeyguardManager::class.java).isKeyguardLocked
                     main.post {
-                        if (!stopping) applyAlertTransition(alertPolicy.onActivityResumed(activity))
+                        if (stopping) return@post
+                        // Recheck before cancelling, and never promote a hidden event after unlocking.
+                        val interactive = interactiveAtEvent &&
+                            getSystemService(PowerManager::class.java).isInteractive
+                        val locked = lockedAtEvent ||
+                            getSystemService(KeyguardManager::class.java).isKeyguardLocked
+                        diagnostics.record(
+                            if (interactive && !locked) "MAIN_WECHAT_FOREGROUND"
+                            else "MAIN_WECHAT_FOREGROUND_IGNORED_LOCKED",
+                        )
+                        applyAlertTransition(alertPolicy.onActivityResumed(activity, interactive, locked))
                     }
                 }
             },
@@ -388,34 +366,6 @@ class MonitorService : Service() {
     private fun removeAlert(notificationId: Int, cancelNotification: Boolean) {
         if (cancelNotification) getSystemService(NotificationManager::class.java).cancel(notificationId)
         applyAlertTransition(alertPolicy.onRemoved(notificationId))
-    }
-
-    private fun clearAlertNotifications() {
-        val manager = getSystemService(NotificationManager::class.java)
-        HelperNotificationIds.alertIds.forEach(manager::cancel)
-        HelperNotificationIds.alertIds.forEach {
-            applyAlertTransition(alertPolicy.onRemoved(it))
-        }
-    }
-
-    private fun startUnlockTimeout() {
-        if (unlockTimeoutJob?.isActive == true || stopping || !alertPolicy.hasPending()) return
-        diagnostics.record("UNLOCK_TIMEOUT_START")
-        unlockTimeoutJob = serviceScope.launch {
-            delay(UNLOCK_TIMEOUT_MS)
-            unlockTimeoutJob = null
-            if (!stopping) {
-                diagnostics.record("UNLOCK_TIMEOUT_EXPIRED")
-                applyAlertTransition(alertPolicy.onUnlockTimeout())
-            }
-        }
-    }
-
-    private fun cancelUnlockTimeout() {
-        val job = unlockTimeoutJob ?: return
-        unlockTimeoutJob = null
-        job.cancel()
-        diagnostics.record("UNLOCK_TIMEOUT_CANCEL")
     }
 
     private fun alertDismissed(notificationId: Int) = PendingIntent.getService(
@@ -452,12 +402,6 @@ class MonitorService : Service() {
         reader?.stop()
         reader = null
         stopActivityWatcher()
-        cancelUnlockTimeout()
-        if (userPresentReceiverRegistered) {
-            unregisterReceiver(userPresentReceiver)
-            userPresentReceiverRegistered = false
-        }
-        serviceScope.cancel()
         queue.shutdownNow()
         main.removeCallbacksAndMessages(null)
         updateStatus { it.copy(serviceRunning = false, readerState = ReaderState.Stopped) }
@@ -480,6 +424,5 @@ class MonitorService : Service() {
         private const val MESSAGE_CHANNEL = "messages"
         private const val CALL_CHANNEL = "calls"
         private const val WATCHDOG_INTERVAL_MS = 60_000L
-        private const val UNLOCK_TIMEOUT_MS = 60_000L
     }
 }

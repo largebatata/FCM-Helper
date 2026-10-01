@@ -62,110 +62,118 @@ class WeChatForegroundTest {
 
     @Test
     fun mainWeChatClearsAlertIdsAndNeverMonitor() {
-        val policy = AlertNotificationPolicy()
-        WeChatFcmType.entries.forEach { policy.onPosted(it) }
-        val transition = policy.onActivityResumed(WeChatForegroundParser.parse(resume(0))!!)
-        assertEquals(HelperNotificationIds.alertIds, transition.cancelIds)
-        assertFalse(HelperNotificationIds.MONITOR_NOTIFICATION_ID in transition.cancelIds)
-        for (type in WeChatFcmType.entries) {
-            assertTrue(HelperNotificationIds.forType(type) in transition.cancelIds)
+        for (raw in listOf(resume(0), setResumed(0))) {
+            val policy = AlertNotificationPolicy()
+            WeChatFcmType.entries.forEach { policy.onReminder(it, notificationPosted = true) }
+            val transition = policy.onActivityResumed(
+                WeChatForegroundParser.parse(raw)!!,
+                isInteractive = true,
+                keyguardLocked = false,
+            )
+            assertEquals(HelperNotificationIds.alertIds, transition.cancelIds)
+            assertFalse(HelperNotificationIds.MONITOR_NOTIFICATION_ID in transition.cancelIds)
+            for (type in WeChatFcmType.entries) {
+                assertTrue(HelperNotificationIds.forType(type) in transition.cancelIds)
+            }
+            assertTrue(transition.stopWatcher)
+            assertFalse(policy.hasPending())
         }
-        assertTrue(transition.stopWatcher)
-        assertFalse(policy.hasPending())
     }
 
     @Test
     fun cloneAndBackgroundEvidenceClearNothing() {
         val policy = AlertNotificationPolicy()
-        assertTrue(policy.onPosted(WeChatFcmType.MESSAGE).startWatcher)
-        val clone = policy.onActivityResumed(WeChatForegroundParser.parse(resume(128))!!)
-        assertTrue(clone.cancelIds.isEmpty())
-        assertFalse(clone.stopWatcher)
-        assertTrue(policy.hasPending())
+        assertTrue(policy.onReminder(WeChatFcmType.MESSAGE, notificationPosted = true).startWatcher)
+        for (raw in listOf(resume(128), setResumed(128), resume(0, "com.example.other/.MainActivity"))) {
+            val transition = policy.onActivityResumed(
+                WeChatForegroundParser.parse(raw)!!,
+                isInteractive = true,
+                keyguardLocked = false,
+            )
+            assertTrue(transition.cancelIds.isEmpty())
+            assertFalse(transition.stopWatcher)
+            assertTrue(policy.hasPending())
+        }
     }
 
     @Test
     fun watcherLifecycleFollowsPendingNotificationSlots() {
         val policy = AlertNotificationPolicy()
         assertFalse(policy.hasPending())
-        assertTrue(policy.onPosted(WeChatFcmType.MESSAGE).startWatcher)
-        assertFalse(policy.onPosted(WeChatFcmType.PC_LOGIN).startWatcher)
-        assertFalse(policy.onPosted(WeChatFcmType.CALL).startWatcher)
+        assertTrue(policy.onReminder(WeChatFcmType.MESSAGE, notificationPosted = true).startWatcher)
+        assertFalse(policy.onReminder(WeChatFcmType.PC_LOGIN, notificationPosted = true).startWatcher)
+        assertFalse(policy.onReminder(WeChatFcmType.CALL, notificationPosted = true).startWatcher)
         assertFalse(policy.onRemoved(HelperNotificationIds.MESSAGE_NOTIFICATION_ID).stopWatcher)
         assertTrue(policy.onRemoved(HelperNotificationIds.CALL_NOTIFICATION_ID).stopWatcher)
         assertFalse(policy.hasPending())
     }
 
     @Test
-    fun lockedAlertsWaitForUserPresentAndRepeatedUnlockDoesNotRestartTimer() {
-        val policy = AlertNotificationPolicy()
-        for (type in WeChatFcmType.entries) {
-            val isolated = AlertNotificationPolicy()
-            isolated.onPosted(type)
-            assertFalse(isolated.hasUnlockTimeout())
-            assertFalse(isolated.onUserPresent(keyguardLocked = true).startUnlockTimeout)
-            assertTrue(isolated.hasPending())
+    fun hiddenOrLockedMainWeChatResumePreservesEveryPendingSlot() {
+        for (raw in listOf(resume(0), setResumed(0))) {
+            for ((interactive, locked) in listOf(false to true, false to false, true to true)) {
+                val policy = AlertNotificationPolicy()
+                WeChatFcmType.entries.forEach { policy.onReminder(it, notificationPosted = true) }
+                val transition = policy.onActivityResumed(
+                    WeChatForegroundParser.parse(raw)!!,
+                    isInteractive = interactive,
+                    keyguardLocked = locked,
+                )
+                assertEquals(AlertTransition(), transition)
+                assertTrue(policy.hasPending())
+                assertFalse(policy.onRemoved(HelperNotificationIds.MESSAGE_NOTIFICATION_ID).stopWatcher)
+                assertTrue(policy.onRemoved(HelperNotificationIds.CALL_NOTIFICATION_ID).stopWatcher)
+            }
         }
-
-        policy.onPosted(WeChatFcmType.MESSAGE)
-        assertTrue(policy.onUserPresent(keyguardLocked = false).startUnlockTimeout)
-        assertTrue(policy.hasUnlockTimeout())
-        assertFalse(policy.onUserPresent(keyguardLocked = false).startUnlockTimeout)
-        assertTrue(policy.hasUnlockTimeout())
     }
 
     @Test
-    fun unlockTimeoutClearsOnlyAlertsAndEndsWatcherSession() {
+    fun unlockAloneHasNoCleanupOrTimeoutHook() {
         val policy = AlertNotificationPolicy()
-        policy.onPosted(WeChatFcmType.MESSAGE)
-        policy.onPosted(WeChatFcmType.CALL)
-        policy.onUserPresent(keyguardLocked = false)
-
-        val transition = policy.onUnlockTimeout()
-        assertEquals(HelperNotificationIds.alertIds, transition.cancelIds)
-        assertFalse(HelperNotificationIds.MONITOR_NOTIFICATION_ID in transition.cancelIds)
-        assertTrue(transition.stopWatcher)
-        assertFalse(policy.hasPending())
-        assertFalse(policy.hasUnlockTimeout())
-    }
-
-    @Test
-    fun mainWeChatCancelsUnlockTimerButCloneKeepsItRunning() {
-        val policy = AlertNotificationPolicy()
-        policy.onPosted(WeChatFcmType.PC_LOGIN)
-        policy.onUserPresent(keyguardLocked = false)
-
-        val clone = policy.onActivityResumed(WeChatForegroundParser.parse(setResumed(128))!!)
-        assertTrue(clone.cancelIds.isEmpty())
-        assertFalse(clone.cancelUnlockTimeout)
+        policy.onReminder(WeChatFcmType.MESSAGE, notificationPosted = true)
+        // Unlock/time passage no longer has a callback capable of clearing pending alerts.
+        val callbacks = AlertNotificationPolicy::class.java.declaredMethods.map { it.name }
+        assertFalse("onUserPresent" in callbacks)
+        assertFalse("onUnlockTimeout" in callbacks)
+        assertFalse("hasUnlockTimeout" in callbacks)
         assertTrue(policy.hasPending())
-        assertTrue(policy.hasUnlockTimeout())
-
-        val main = policy.onActivityResumed(WeChatForegroundParser.parse(setResumed(0))!!)
-        assertEquals(HelperNotificationIds.alertIds, main.cancelIds)
-        assertTrue(main.cancelUnlockTimeout)
-        assertTrue(main.stopWatcher)
-        assertFalse(policy.hasPending())
-        assertFalse(policy.hasUnlockTimeout())
+        assertTrue(policy.onRemoved(HelperNotificationIds.MESSAGE_NOTIFICATION_ID).stopWatcher)
     }
 
     @Test
-    fun userPresentWithoutPendingDoesNothingAndManualRemovalCancelsTimer() {
+    fun newUnlockedToastsPreserveMultiplePendingNotifications() {
         val policy = AlertNotificationPolicy()
-        assertFalse(policy.onUserPresent(keyguardLocked = false).startUnlockTimeout)
-        policy.onPosted(WeChatFcmType.UNKNOWN)
-        policy.onUserPresent(keyguardLocked = false)
-
-        val transition = policy.onRemoved(HelperNotificationIds.UNKNOWN_NOTIFICATION_ID)
-        assertTrue(transition.cancelUnlockTimeout)
-        assertTrue(transition.stopWatcher)
+        policy.onReminder(WeChatFcmType.MESSAGE, notificationPosted = true)
+        policy.onReminder(WeChatFcmType.CALL, notificationPosted = true)
+        for (type in WeChatFcmType.entries) {
+            assertEquals(AlertTransition(), policy.onReminder(type, notificationPosted = false))
+            assertTrue(policy.hasPending())
+        }
+        assertFalse(policy.onRemoved(HelperNotificationIds.MESSAGE_NOTIFICATION_ID).stopWatcher)
+        assertTrue(policy.hasPending())
+        assertTrue(policy.onRemoved(HelperNotificationIds.CALL_NOTIFICATION_ID).stopWatcher)
         assertFalse(policy.hasPending())
+    }
+
+    @Test
+    fun manualDismissRemovesEveryTypeAndStopsTheLastWatcher() {
+        for (type in WeChatFcmType.entries) {
+            val policy = AlertNotificationPolicy()
+            assertEquals(AlertTransition(), policy.onReminder(type, notificationPosted = false))
+            assertFalse(policy.hasPending())
+            policy.onReminder(type, notificationPosted = true)
+            val transition = policy.onRemoved(HelperNotificationIds.forType(type))
+            assertTrue(transition.cancelIds.isEmpty())
+            assertTrue(transition.stopWatcher)
+            assertFalse(policy.hasPending())
+            assertEquals(AlertTransition(), policy.onRemoved(HelperNotificationIds.forType(type)))
+        }
     }
 
     @Test
     fun activityChildExitRestartsOnlyWhileAlertIsPending() {
         val policy = AlertNotificationPolicy()
-        policy.onPosted(WeChatFcmType.UNKNOWN)
+        policy.onReminder(WeChatFcmType.UNKNOWN, notificationPosted = true)
         val opens = AtomicInteger()
         val replacementEntered = CountDownLatch(1)
         val replacementClosed = CountDownLatch(1)

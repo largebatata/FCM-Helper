@@ -75,18 +75,17 @@ object HelperNotificationIds {
 data class AlertTransition(
     val startWatcher: Boolean = false,
     val stopWatcher: Boolean = false,
-    val startUnlockTimeout: Boolean = false,
-    val cancelUnlockTimeout: Boolean = false,
     val cancelIds: Set<Int> = emptySet(),
 )
 
 /** Tracks current notification slots only; historical event counters are untouched. */
 class AlertNotificationPolicy {
     private val pendingIds = LinkedHashSet<Int>()
-    private var unlockTimeoutActive = false
 
     @Synchronized
-    fun onPosted(type: WeChatFcmType): AlertTransition {
+    fun onReminder(type: WeChatFcmType, notificationPosted: Boolean): AlertTransition {
+        // A new Toast is not evidence that any older notification was viewed.
+        if (!notificationPosted) return AlertTransition()
         val wasEmpty = pendingIds.isEmpty()
         pendingIds.add(HelperNotificationIds.forType(type))
         return AlertTransition(startWatcher = wasEmpty)
@@ -96,42 +95,20 @@ class AlertNotificationPolicy {
     fun onRemoved(notificationId: Int): AlertTransition {
         val removed = pendingIds.remove(notificationId)
         val becameEmpty = removed && pendingIds.isEmpty()
-        if (becameEmpty) unlockTimeoutActive = false
-        return AlertTransition(
-            stopWatcher = becameEmpty,
-            cancelUnlockTimeout = becameEmpty,
-        )
+        return AlertTransition(stopWatcher = becameEmpty)
     }
 
     @Synchronized
-    fun onActivityResumed(activity: ActivityResumeEvent): AlertTransition {
-        if (!WeChatForegroundParser.isMainWeChat(activity) || pendingIds.isEmpty()) {
+    fun onActivityResumed(
+        activity: ActivityResumeEvent,
+        isInteractive: Boolean,
+        keyguardLocked: Boolean,
+    ): AlertTransition {
+        if (!isInteractive || keyguardLocked ||
+            !WeChatForegroundParser.isMainWeChat(activity) || pendingIds.isEmpty()
+        ) {
             return AlertTransition()
         }
-        pendingIds.clear()
-        val cancelTimeout = unlockTimeoutActive
-        unlockTimeoutActive = false
-        return AlertTransition(
-            stopWatcher = true,
-            cancelUnlockTimeout = cancelTimeout,
-            cancelIds = HelperNotificationIds.alertIds,
-        )
-    }
-
-    @Synchronized
-    fun onUserPresent(keyguardLocked: Boolean): AlertTransition {
-        if (keyguardLocked || pendingIds.isEmpty() || unlockTimeoutActive) return AlertTransition()
-        unlockTimeoutActive = true
-        return AlertTransition(startUnlockTimeout = true)
-    }
-
-    @Synchronized
-    fun onUnlockTimeout(): AlertTransition {
-        if (!unlockTimeoutActive || pendingIds.isEmpty()) {
-            unlockTimeoutActive = false
-            return AlertTransition()
-        }
-        unlockTimeoutActive = false
         pendingIds.clear()
         return AlertTransition(
             stopWatcher = true,
@@ -141,7 +118,4 @@ class AlertNotificationPolicy {
 
     @Synchronized
     fun hasPending(): Boolean = pendingIds.isNotEmpty()
-
-    @Synchronized
-    fun hasUnlockTimeout(): Boolean = unlockTimeoutActive
 }

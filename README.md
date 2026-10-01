@@ -2,7 +2,7 @@
 
 FCM Helper 是一个面向特定 Android、microG 和 Google Play 版微信环境的本地辅助工具。它通过受限的 `READ_LOGS` 权限窄范围读取 microG 的微信 FCM 日志，识别普通消息、微信电话、电脑版登录请求和未知事件，并按锁屏状态显示提醒。
 
-当前正式版本：`1.0.0`（`versionCode 3`）。发布文件为 `FCM-Helper-1.0.0.apk`；下载后请按发布记录核对 SHA-256 和签名证书指纹。
+当前正式版本：`1.0.1`（`versionCode 4`）。发布文件为 `FCM-Helper-1.0.1.apk`；下载后请按发布记录核对 SHA-256 和签名证书指纹。
 
 ## 当前验证环境
 
@@ -15,7 +15,7 @@ FCM Helper 是一个面向特定 Android、microG 和 Google Play 版微信环�
 
 ## Huawei / HarmonyOS 推荐系统设置
 
-以下设置基于当前实际测试环境，用于兼顾 FCM 可达性、后台耗电和微信唤醒行为。不同 HarmonyOS / EMUI 版本中的菜单名称可能略有差异。
+以下设置基于当前 HarmonyOS 4.3 实际测试环境，用于兼顾 FCM 可达性、后台耗电和微信唤醒行为。不同 HarmonyOS / EMUI 版本中的菜单名称可能略有差异。
 
 ### microG
 
@@ -50,7 +50,7 @@ microG 需要能够稳定在后台运行，否则微信 FCM 本身可能无法�
 ## 功能
 
 - FCM 检测只监听 `GmsGcmMcsInput` 和 `GmsGcmMcsSvc` 两个 Logcat tag
-- 有待处理提醒时，额外窄范围监听 Activity 前台事件；仅主微信 user 0 进入前台时提前清除提醒
+- 有待处理提醒时，额外窄范围监听 Activity 前台事件；仅在屏幕可交互且已解锁时，主微信 user 0 进入前台才清除提醒
 - 分类 `MESSAGE`、`CALL`、`PC_LOGIN` 和 `UNKNOWN`
 - 前台解锁状态使用 Toast，锁屏状态使用通知
 - Logcat 子进程 EOF、异常退出或权限丢失后自动恢复
@@ -94,7 +94,9 @@ microG 需要能够稳定在后台运行，否则微信 FCM 本身可能无法�
 4. 手机处于解锁前台状态时，通过 Toast 提醒。
 5. 手机处于锁屏状态时，通过系统通知提醒。
 6. 点击事件通知后，FCM Helper 会尝试打开微信。
-7. 当 user 0 主微信进入前台后，相关 Helper 提醒会提前清除。
+7. 只有屏幕可交互、设备已解锁且 user 0 主微信真正进入前台后，相关 Helper 提醒才会清除。
+
+单纯亮屏、解锁、等待或点击通知本身不会清除提醒；新的前台 Toast 也不会清除此前未确认查看的锁屏通知。用户仍可手动划掉提醒。
 
 如果华为系统中同时安装了主微信和微信分身，点击事件通知时系统可能弹出主微信/微信分身选择界面，这是系统 Launcher 的正常行为。
 
@@ -123,7 +125,7 @@ FCM Helper 只负责补充“微信事件已经到达”的提醒，不读取或
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat testDebugUnitTest assembleRelease
-.\scripts\Sign-Release.ps1 -InputApk .\app\build\outputs\apk\release\app-release-unsigned.apk -OutputApk .\app\build\outputs\release\FCM-Helper-1.0.0.apk -BuildToolsDir (Join-Path $env:ANDROID_HOME 'build-tools\37.0.0')
+.\scripts\Sign-Release.ps1 -InputApk .\app\build\outputs\apk\release\app-release-unsigned.apk -OutputApk .\app\build\outputs\release\FCM-Helper-1.0.1.apk -BuildToolsDir (Join-Path $env:ANDROID_HOME 'build-tools\37.0.0')
 ```
 
 最后一条命令要求 `ANDROID_HOME` 指向本机已有 SDK；也可直接传入实际 Build Tools 路径，不改变项目 `local.properties` 的 SDK。Release 构建启用 AGP 9.3 应用优化和资源裁剪。仓库不包含发布私钥或密码；[签名脚本](scripts/Sign-Release.ps1)默认只接受已有正式密钥，防止换电脑时无意生成新证书。密钥和经 Windows 用户账户加密的密码保存在项目外，后续版本必须沿用同一证书。跨电脑恢复需要现有密钥的独立备份及另外保管的恢复口令，不能只依赖 Windows DPAPI 文件。
