@@ -138,7 +138,9 @@ $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 .\scripts\Sign-Release.ps1 -InputApk .\app\build\outputs\apk\release\app-release-unsigned.apk -OutputApk .\app\build\outputs\release\FCM-Helper-1.0.1.apk -BuildToolsDir (Join-Path $env:ANDROID_HOME 'build-tools\37.0.0')
 ```
 
-最后一条命令要求 `ANDROID_HOME` 指向本机已有 SDK；也可直接传入实际 Build Tools 路径，不改变项目 `local.properties` 的 SDK。Release 构建启用 AGP 9.3 应用优化和资源裁剪。仓库不包含发布私钥或密码；[签名脚本](scripts/Sign-Release.ps1)默认只接受已有正式密钥，防止换电脑时无意生成新证书。密钥和经 Windows 用户账户加密的密码保存在项目外，后续版本必须沿用同一证书。跨电脑恢复需要现有密钥的独立备份及另外保管的恢复口令，不能只依赖 Windows DPAPI 文件。
+最后一条命令要求 `ANDROID_HOME` 指向本机已有 SDK；也可直接传入实际 Build Tools 路径，不改变项目 `local.properties` 的 SDK。
+
+Release 构建启用 AGP 9.3 应用优化和资源裁剪。仓库不包含正式发布私钥或密码；[签名脚本](scripts/Sign-Release.ps1)默认使用已有正式密钥。后续正式版本必须继续使用同一应用签名证书。
 
 ## 致谢
 
