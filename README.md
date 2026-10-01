@@ -4,6 +4,8 @@ FCM Helper 是一个面向特定 Android、microG 和 Google Play 版微信环�
 
 当前正式版本：`1.0.1`（`versionCode 4`）。发布文件为 `FCM-Helper-1.0.1.apk`；下载后请按发布记录核对 SHA-256 和签名证书指纹。
 
+当前开发测试版本：`1.0.2`（`versionCode 5`），尚未发布。本次仅完善 App 内隐私入口及权限说明；GitHub 与 Google Play 使用同一套源码，不建立渠道分叉。
+
 ## 当前验证环境
 
 - 华为 HarmonyOS 4.3 设备
@@ -110,9 +112,17 @@ FCM Helper 只负责补充“微信事件已经到达”的提醒，不读取或
 
 微信组件导出状态及后台限制会随版本和系统变化。增强唤醒失败不会影响 FCM 读取、分类、Toast 或通知。
 
-## 隐私
+## 权限与隐私
 
-所有处理均在设备本地完成。事件历史只保存时间戳和类型；诊断日志只记录状态、错误类别和计数。项目不保存 FCM payload、完整 seq、rdata、uin、聊天内容、联系人、微信号或手机号，也不包含广告、analytics、账号系统、云上传或后台服务器。详见 [PRIVACY.md](PRIVACY.md)。
+- `READ_LOGS` 是受限权限，需要用户主动通过 ADB 授权；App 不会静默获取此权限。
+- FCM 检测只读取必要的 `GmsGcmMcsInput` / `GmsGcmMcsSvc` 日志。有待处理提醒时，额外临时监听 `wm_resume_activity` / `wm_set_resumed_activity`，用于判断主微信前台状态；不扫描或保存完整系统日志。
+- 所有 FCM 解析均在设备本地完成，不读取微信数据库，不保存聊天正文、完整 FCM payload、完整 seq、rdata、uin、联系人、微信号或手机号，不自动上传数据。
+- 事件历史仅保存时间戳和事件类型；脱敏诊断记录状态、错误类别和计数。只有用户主动导出并分享时，所选第三方 App 才可能接收到诊断文件。
+- 不包含广告、analytics、用户账号系统或云端后台服务。App 不申请网络权限；隐私政策网页通过标准 Android 链接交由外部浏览器或支持该链接的 App 打开。
+
+初始设置页和设置页均提供“隐私与数据使用”，可查看[公开隐私政策](https://github.com/largebatata/FCM-Helper/blob/main/PRIVACY.md)和本地“权限与数据使用说明”，无需先授予 `READ_LOGS` 或启动监听。完整说明见 [PRIVACY.md](PRIVACY.md)。
+
+FCM Helper 使用用户主动启动的前台服务，持续监听指定 microG FCM 日志并提供本地提醒；常驻通知表明监听状态。这是第三方辅助工具，并非系统级服务、必需后台服务或 Google / microG / 微信官方功能。
 
 ## 排障
 

@@ -3,6 +3,7 @@ package com.largebatata.fcmhelper
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -31,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -174,6 +176,7 @@ class MainActivity : ComponentActivity() {
                     .padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                PrivacyAndDataSection()
                 SectionCard("1 · 环境检查") {
                     DetailRow("Android", "${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}")
                     DetailRow("设备", "${Build.MANUFACTURER} ${Build.MODEL}")
@@ -660,11 +663,12 @@ class MainActivity : ComponentActivity() {
             Column(
                 Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState())
                     .padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 SectionCard("外观") {
                     ThemeSelectorRow(selectedTheme, onThemeSelected)
                 }
+                PrivacyAndDataSection()
                 SectionCard("增强唤醒（实验性）") {
                     DetailRow("Shizuku", shizukuStatus(wakeState), stateColor(wakeState.running))
                     DetailRow(
@@ -686,7 +690,7 @@ class MainActivity : ComponentActivity() {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
                     Text(
-                        "收到去重后的消息、电话或电脑登录事件时，可尝试通过 Shizuku 唤醒主微信后台。不同设备、系统及微信版本可能不可用，不影响 FCM 监听与提醒。",
+                        "可尝试通过 Shizuku 唤醒主微信后台。可用性因设备、系统及微信版本而异，失败不影响 FCM 监听与提醒。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -729,16 +733,8 @@ class MainActivity : ComponentActivity() {
                         Text("导出诊断信息")
                     }
                 }
-                SectionCard("隐私") {
-                    Text(
-                        "仅保存脱敏状态与事件类型，不保存消息内容或完整 FCM 数据。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 SectionCard("关于") {
-                    DetailRow("App", "FCM Helper")
-                    DetailRow("版本", appVersion())
+                    DetailRow("App / 版本", "FCM Helper · ${appVersion()}")
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("Package", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
@@ -753,6 +749,60 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun PrivacyAndDataSection() {
+        var showDataUse by rememberSaveable { mutableStateOf(false) }
+        SectionCard(getString(R.string.privacy_section_title)) {
+            Text(
+                getString(R.string.privacy_section_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = ::openPrivacyPolicy,
+                    modifier = Modifier.weight(0.4f),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                ) {
+                    Text(getString(R.string.privacy_policy_button), textAlign = TextAlign.Center)
+                }
+                TextButton(
+                    onClick = { showDataUse = true },
+                    modifier = Modifier.weight(0.6f),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                ) {
+                    Text(getString(R.string.permissions_data_use_title), textAlign = TextAlign.Center)
+                }
+            }
+        }
+        if (showDataUse) {
+            AlertDialog(
+                onDismissRequest = { showDataUse = false },
+                title = { Text(getString(R.string.permissions_data_use_title)) },
+                text = {
+                    Text(
+                        getString(R.string.permissions_data_use_body),
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { showDataUse = false }) {
+                        Text(getString(R.string.privacy_close_button))
+                    }
+                },
+            )
+        }
+    }
+
+    private fun openPrivacyPolicy() {
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.privacy_policy_url))))
+        }.onFailure {
+            Toast.makeText(this, R.string.privacy_policy_open_failed, Toast.LENGTH_LONG).show()
         }
     }
 

@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">FCM Helper</string>
+    <string name="privacy_section_title">隐私与数据使用</string>
+    <string name="privacy_section_summary">仅本地处理，不读取聊天数据库，不上传聊天数据。</string>
+    <string name="privacy_policy_button">查看隐私政策</string>
+    <string name="privacy_policy_url" translatable="false">https://github.com/largebatata/FCM-Helper/blob/main/PRIVACY.md</string>
+    <string name="privacy_policy_open_failed">暂时无法打开隐私政策，请安装或启用浏览器后重试。权限与数据使用说明仍可在本页查看。</string>
+    <string name="permissions_data_use_title">权限与数据使用说明</string>
+    <string name="privacy_close_button">关闭</string>
+    <string name="permissions_data_use_body">READ_LOGS（受限权限）\n用于读取 microG 与微信 FCM 到达相关的有限日志。FCM 检测只针对 GmsGcmMcsInput / GmsGcmMcsSvc。此权限需要你主动通过 ADB 授权，App 不会静默获取。\n\n读取范围\n有待处理提醒时，额外临时读取 wm_resume_activity / wm_set_resumed_activity，用于判断 user 0 主微信是否进入前台；不保存完整 Activity 日志。不会扫描或保存完整系统日志，不保存完整 FCM payload、完整 seq、rdata、uin。不会读取微信聊天数据库，不保存聊天正文、联系人、微信号或手机号。\n\n本地处理\nFCM 解析在设备本地完成，不上传聊天数据。不包含广告、analytics、用户账号系统或云端后台服务。最近24小时事件历史仅保存时间戳和事件类型，最多200条。\n\n通知与前台服务\n通知权限用于显示本地提醒。前台服务由你主动点击“开始监听”启动，持续监听指定 microG FCM 日志并提供本地提醒；常驻通知用于表明监听状态。它不是系统级服务或 Google、microG、微信官方功能。\n\n诊断\n本地诊断日志仅记录脱敏运行状态。诊断导出只在你主动操作时进行，包含状态、事件类型、必要设备与版本信息、权限、reader PID、重连计数、退出码及错误类别等，不含聊天正文或完整 FCM payload。只有主动分享文件后，你选择的第三方 App 才可能接收到它。\n\n实验性增强\nShizuku 增强唤醒默认关闭，启用后仅执行本地微信服务唤醒尝试，失败不影响核心提醒。\n\n隐私政策\n查看隐私政策将交由外部浏览器或可处理该链接的 App 打开 GitHub 页面；其联网行为遵循相应第三方政策。</string>
 </resources>
