@@ -17,6 +17,8 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import com.largebatata.fcmhelper.core.ActivityWatcherEvidence
+import com.largebatata.fcmhelper.logconfig.LogPropertyManager
 import com.largebatata.fcmhelper.core.FcmParser
 import com.largebatata.fcmhelper.core.FcmPipeline
 import com.largebatata.fcmhelper.core.AlertNotificationPolicy
@@ -32,12 +34,14 @@ import com.largebatata.fcmhelper.core.WeChatForegroundParser
 import com.largebatata.fcmhelper.wake.EnhancedWakeManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.Locale
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 data class MonitorStatus(
     val serviceRunning: Boolean = false,
+    val activityEvidence: ActivityWatcherEvidence = ActivityWatcherEvidence(),
     val readerState: ReaderState = ReaderState.Stopped,
     val reconnectCount: Int = 0,
     val lastMatchedLog: Long? = null,
@@ -83,6 +87,7 @@ class MonitorService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var reader: LogcatReader? = null
     private var activityWatcher: SupervisedLineReader? = null
+    @Volatile private var watcherGeneration = 0L
     private val alertPolicy = AlertNotificationPolicy()
     private lateinit var diagnostics: ReaderDiagnostics
     private lateinit var listening: ListeningPreference
@@ -113,6 +118,7 @@ class MonitorService : Service() {
         diagnostics = ReaderDiagnostics(this)
         listening = ListeningPreference(this)
         diagnostics.record("SERVICE_CREATE")
+        LogPropertyManager.refresh()
         val monitor = NotificationChannel(MONITOR_CHANNEL, "监听状态", NotificationManager.IMPORTANCE_LOW).apply {
             description = "FCM Helper 前台监听状态"
             setSound(null, null)
@@ -263,7 +269,7 @@ class MonitorService : Service() {
         checkSelfPermission(Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED
 
     private fun updateStatus(block: (MonitorStatus) -> MonitorStatus) {
-        MonitorUi.mutable.value = block(MonitorUi.mutable.value)
+        MonitorUi.mutable.update(block)
     }
 
     private fun post(block: () -> Unit) {
@@ -314,6 +320,19 @@ class MonitorService : Service() {
         transition.cancelIds.forEach {
             manager.cancel(it)
         }
+        if (transition.cancelIds.isNotEmpty()) {
+            // One readback per cancellation, never a timer or a scan of other apps' notifications.
+            val absent = runCatching {
+                manager.activeNotifications.none { it.id in transition.cancelIds }
+            }.getOrNull()
+            diagnostics.record(
+                if (absent == true) "ALERT_CANCEL_CONFIRMED" else "ALERT_CANCEL_NOT_CONFIRMED",
+                mapOf("count" to transition.cancelIds.size.toString()),
+            )
+            if (absent == true) updateStatus {
+                it.copy(activityEvidence = it.activityEvidence.copy(lastCancellationConfirmed = System.currentTimeMillis()))
+            }
+        }
         if (transition.stopWatcher) stopActivityWatcher()
         if (transition.startWatcher) startActivityWatcher()
     }
@@ -321,6 +340,8 @@ class MonitorService : Service() {
     private fun startActivityWatcher() {
         if (activityWatcher != null || stopping || !alertPolicy.hasPending()) return
         val startedAt = System.currentTimeMillis()
+        val generation = ++watcherGeneration
+        var firstSystemEvent = true
         activityWatcher = SupervisedLineReader(
             source = AndroidActivityResumeSource(),
             permission = ::hasReadLogs,
@@ -328,10 +349,32 @@ class MonitorService : Service() {
             cursor = { "0" },
             elapsedClock = SystemClock::elapsedRealtime,
             wallClock = System::currentTimeMillis,
-            onState = { _, _ -> },
+            onState = { state, _ ->
+                updateStatus {
+                    if (generation != watcherGeneration) it
+                    else it.copy(activityEvidence = it.activityEvidence.copy(state = state))
+                }
+            },
+            onHealth = { health ->
+                updateStatus {
+                    if (generation != watcherGeneration) it
+                    else it.copy(activityEvidence = it.activityEvidence.copy(
+                        pid = health.pid, childAlive = health.isAlive, childStartedAt = health.lastStartTime,
+                    ))
+                }
+            },
             onDiagnostic = { event, fields -> diagnostics.record("ACTIVITY_$event", fields) },
             onLine = { line ->
                 val activity = WeChatForegroundParser.parse(line)
+                if (activity != null && activity.timestampMillis >= startedAt && generation == watcherGeneration) {
+                    updateStatus {
+                        it.copy(activityEvidence = it.activityEvidence.copy(lastEventRead = System.currentTimeMillis()))
+                    }
+                    if (firstSystemEvent) {
+                        firstSystemEvent = false
+                        diagnostics.record("ACTIVITY_EVENT_READ", mapOf("source" to activity.sourceType.name))
+                    }
+                }
                 if (activity != null && activity.timestampMillis >= startedAt &&
                     WeChatForegroundParser.isMainWeChat(activity)
                 ) {
@@ -348,6 +391,11 @@ class MonitorService : Service() {
                             if (interactive && !locked) "MAIN_WECHAT_FOREGROUND"
                             else "MAIN_WECHAT_FOREGROUND_IGNORED_LOCKED",
                         )
+                        if (interactive && !locked) updateStatus {
+                            it.copy(activityEvidence = it.activityEvidence.copy(
+                                lastMainWeChatVisible = System.currentTimeMillis(),
+                            ))
+                        }
                         applyAlertTransition(alertPolicy.onActivityResumed(activity, interactive, locked))
                     }
                 }
@@ -358,8 +406,12 @@ class MonitorService : Service() {
 
     private fun stopActivityWatcher() {
         val watcher = activityWatcher ?: return
+        ++watcherGeneration
         watcher.stop()
         activityWatcher = null
+        updateStatus {
+            it.copy(activityEvidence = it.activityEvidence.copy(state = ReaderState.Stopped, pid = null, childAlive = false))
+        }
         diagnostics.record("ACTIVITY_WATCHER_STOP")
     }
 

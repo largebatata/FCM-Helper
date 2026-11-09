@@ -20,34 +20,39 @@ object WeChatForegroundParser {
 
     fun parse(raw: String): ActivityResumeEvent? = runCatching {
         val trimmed = raw.trimStart()
-        val (markerText, sourceType, componentIndex) = when {
-            RESUME_MARKER in trimmed -> Triple(RESUME_MARKER, ActivityResumeSource.RESUME_ACTIVITY, 3)
-            SET_RESUMED_MARKER in trimmed -> Triple(
-                SET_RESUMED_MARKER,
-                ActivityResumeSource.SET_RESUMED_ACTIVITY,
-                1,
-            )
+        val (markerText, sourceType) = when {
+            RESUME_MARKER in trimmed -> RESUME_MARKER to ActivityResumeSource.RESUME_ACTIVITY
+            SET_RESUMED_MARKER in trimmed -> SET_RESUMED_MARKER to ActivityResumeSource.SET_RESUMED_ACTIVITY
             else -> return null
         }
         val marker = trimmed.indexOf(markerText)
         if (marker <= 0) return null
         val timestamp = trimmed.substring(0, marker).substringBefore(' ').toBigDecimalOrNull() ?: return null
-        val body = trimmed.substring(marker + markerText.length)
+        val body = trimmed.substring(marker + markerText.length).trim()
         if (!body.startsWith('[') || !body.endsWith(']')) return null
-        val fields = body.substring(1, body.length - 1).split(',', limit = 4)
-        if (fields.size != 4) return null
-        val userId = fields[0].trim().toIntOrNull() ?: return null
-        val component = fields[componentIndex].trim()
+        val fields = body.substring(1, body.length - 1).split(',').map(String::trim)
+        val expectedFields = if (sourceType == ActivityResumeSource.RESUME_ACTIVITY) 4 else 3
+        if (fields.size != expectedFields || fields.any(String::isEmpty)) return null
+        val userId = fields[0].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+        val component = fields[if (sourceType == ActivityResumeSource.RESUME_ACTIVITY) 3 else 1]
         val slash = component.indexOf('/')
-        if (slash <= 0) return null
+        if (slash <= 0 || slash != component.lastIndexOf('/')) return null
+        val packageName = component.substring(0, slash)
+        val className = component.substring(slash + 1).removePrefix(".")
+        if (!validName(packageName, allowDollar = false) || !validName(className, allowDollar = true)) return null
         ActivityResumeEvent(
-            timestampMillis = timestamp.movePointRight(3).toLong(),
+            timestampMillis = timestamp.movePointRight(3).setScale(0, java.math.RoundingMode.DOWN).longValueExact().also { require(it >= 0) },
             userId = userId,
-            packageName = component.substring(0, slash),
+            packageName = packageName,
             componentName = component,
             sourceType = sourceType,
         )
     }.getOrNull()
+
+    private fun validName(name: String, allowDollar: Boolean): Boolean = name.split('.').all { part ->
+        fun isStart(c: Char) = c in 'a'..'z' || c in 'A'..'Z' || c == '_' || (allowDollar && c == '$')
+        part.isNotEmpty() && isStart(part.first()) && part.all { isStart(it) || it in '0'..'9' }
+    }
 
     fun isMainWeChat(activity: ActivityResumeEvent): Boolean =
         activity.userId == 0 && activity.packageName == WECHAT_CATEGORY

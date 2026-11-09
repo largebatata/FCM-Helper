@@ -34,6 +34,8 @@ FCM Helper 完全在设备本地处理，不上传聊天数据，不包含广告
 
 Shizuku 增强唤醒是默认关闭的实验性本地功能；启用后使用用户授予的权限尝试唤醒主微信服务，不读取聊天数据库。
 
+启动时只读检查 `log.tag.GmsGcmMcsInput`、`log.tag.GmsGcmMcsSvc`、`log.tag.wm_resume_activity` 和 `log.tag.wm_set_resumed_activity`。设置页可主动复查；只有用户主动点击修复并已授权 Shizuku 时，才分别设置前两项为 `DEBUG`、后两项为 `INFO`，随后读回验证。不修改 `persist.*`，不做持久化设置，也不会自动开启增强唤醒。诊断仅记录这四项的检查状态、修复验证结果及前台事件/撤销时间，不保存完整 Activity 事件内容。
+
 ## 清理
 
 - 历史页面和设置页可以单独清空最近24小时历史。

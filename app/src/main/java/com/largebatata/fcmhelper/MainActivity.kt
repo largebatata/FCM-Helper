@@ -66,6 +66,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.largebatata.fcmhelper.core.EventHistoryEntry
 import com.largebatata.fcmhelper.core.ReaderState
+import com.largebatata.fcmhelper.core.PropertyCheckState
+import com.largebatata.fcmhelper.core.hasCurrentLogEvidence
+import com.largebatata.fcmhelper.logconfig.LogPropertyManager
 import com.largebatata.fcmhelper.core.WeChatFcmType
 import com.largebatata.fcmhelper.ui.theme.ThemeMode
 import com.largebatata.fcmhelper.ui.theme.ThemePreference
@@ -344,10 +347,10 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun HealthCard(status: MonitorStatus) {
         SectionCard("运行健康") {
-            val health = readerHealth(status.readerState)
+            val health = readerHealth(status)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CompactMetric("监听器", health.first, health.second, Modifier.weight(1f))
-                CompactMetric("最后读取", homeTime(status.lastSuccessfulLogLine), modifier = Modifier.weight(1f))
+                CompactMetric("有效FCM日志", homeTime(status.lastMatchedLog), modifier = Modifier.weight(1f))
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CompactMetric("重连", status.reconnectCount.toString(), modifier = Modifier.weight(1f))
@@ -669,6 +672,7 @@ class MainActivity : ComponentActivity() {
                     ThemeSelectorRow(selectedTheme, onThemeSelected)
                 }
                 PrivacyAndDataSection()
+                LogPropertySettings()
                 SectionCard("增强唤醒（实验性）") {
                     DetailRow("Shizuku", shizukuStatus(wakeState), stateColor(wakeState.running))
                     DetailRow(
@@ -720,6 +724,15 @@ class MainActivity : ComponentActivity() {
                     DetailRow("最近启动", fullTime(status.lastReaderStart))
                     DetailRow("最后成功日志", fullTime(status.lastSuccessfulLogLine))
                     DetailRow("最后微信 FCM", fullTime(status.lastFcm))
+                    DetailRow("FCM 读取循环", status.readerState.name)
+                    DetailRow("有效 FCM 日志", fullTime(status.lastMatchedLog))
+                    val evidence = status.activityEvidence
+                    DetailRow("Activity 子进程", if (evidence.childAlive) "存活 · ${evidence.pid ?: "未知 PID"}" else "不存在")
+                    DetailRow("Activity 读取循环", if (evidence.running) "运行 · ${evidence.state.name}" else evidence.state.name)
+                    DetailRow("当前事件读取验证", if (evidence.eventDeliveryVerified) "已读有效系统事件" else "尚未验证（无日志不等于故障）")
+                    DetailRow("最后系统事件", fullTime(evidence.lastEventRead))
+                    DetailRow("主微信可见前台", fullTime(evidence.lastMainWeChatVisible))
+                    DetailRow("提醒撤销已确认", fullTime(evidence.lastCancellationConfirmed))
                     DetailRow("最近退出码", status.lastReaderExitCode?.toString() ?: "无")
                     DetailRow("故障类型", status.lastReaderFailureType ?: "无")
                     DetailRow("Shizuku", shizukuStatus(wakeState))
@@ -750,6 +763,61 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    @Composable
+    private fun LogPropertySettings() {
+        val state by LogPropertyManager.state.collectAsState()
+        val wake by EnhancedWakeManager.state.collectAsState()
+        var show by rememberSaveable { mutableStateOf(false) }
+        SectionCard("日志属性自检与修复") {
+            val matched = state.checks.count { it.state == PropertyCheckState.MATCH }
+            Text(
+                if (state.busy) "正在检查或修复…" else "属性符合要求：$matched / 4（不代表已读到日志）",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = { show = true; LogPropertyManager.refresh() }) { Text("查看状态与修复") }
+        }
+        if (show) AlertDialog(
+            onDismissRequest = { show = false },
+            title = { Text("日志属性自检与修复") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("仅修改四项临时日志属性，不修改 persist.*；重启后可能需要重新修复。不启用微信增强唤醒。")
+                    state.checks.forEach { check ->
+                        val label = when (check.state) {
+                            PropertyCheckState.MATCH -> "符合要求"
+                            PropertyCheckState.UNSET -> "未设置（系统默认值不能视为已验证）"
+                            PropertyCheckState.MISMATCH -> "不符合要求"
+                            PropertyCheckState.READ_FAILED -> "读取失败"
+                        }
+                        Text(check.property.propertyName, style = MaterialTheme.typography.labelMedium)
+                        Text("当前：${check.value?.ifBlank { "未设置" } ?: "读取失败"}；要求：${check.property.expected} · $label",
+                            style = MaterialTheme.typography.bodySmall)
+                        state.lastRepair?.let { report ->
+                            val before = report.before.first { it.property == check.property }.value.orEmpty().ifBlank { "未设置/读取失败" }
+                            val code = report.exitCodes.getOrNull(check.property.ordinal)?.toString() ?: "未确认"
+                            Text("修复前：$before；命令退出码：$code；读回：${check.state.name}", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Text("修复将执行：", style = MaterialTheme.typography.labelMedium)
+                    com.largebatata.fcmhelper.core.LogProperty.entries.forEach {
+                        Text("setprop ${it.propertyName} ${it.expected}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("Shizuku：${shizukuStatus(wake)} · ${wake.permissionLabel}", style = MaterialTheme.typography.bodySmall)
+                    if (wake.canRequestPermission) {
+                        TextButton(onClick = EnhancedWakeManager::requestPermission) { Text("授予 Shizuku 权限") }
+                    }
+                    state.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    Text("最近检查：${fullTime(state.checkedAt)}", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = LogPropertyManager::refresh, enabled = !state.busy) { Text("重新检查") }
+                    Button(onClick = LogPropertyManager::repair, enabled = !state.busy && state.checks.size == 4) {
+                        Text("通过 Shizuku 修复")
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { show = false }) { Text("关闭") } },
+        )
     }
 
     @Composable
@@ -917,8 +985,11 @@ class MainActivity : ComponentActivity() {
         if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
 
     @Composable
-    private fun readerHealth(state: ReaderState): Pair<String, Color> = when (state) {
-        ReaderState.WaitingForLogs, ReaderState.Receiving -> "✓ 正常" to MaterialTheme.colorScheme.primary
+    private fun readerHealth(status: MonitorStatus): Pair<String, Color> = when (status.readerState) {
+        ReaderState.WaitingForLogs, ReaderState.Receiving -> if (hasCurrentLogEvidence(
+            status.readerState, status.readerAlive, status.lastReaderStart, status.lastMatchedLog,
+        )) "已读指定日志" to MaterialTheme.colorScheme.primary
+        else "等日志验证" to MaterialTheme.colorScheme.onSurfaceVariant
         ReaderState.Starting, ReaderState.Reconnecting -> "↻ 恢复中" to MaterialTheme.colorScheme.secondary
         ReaderState.PermissionMissing, ReaderState.AccessDenied, ReaderState.Error -> "! 异常" to MaterialTheme.colorScheme.error
         ReaderState.Stopped -> "已停止" to MaterialTheme.colorScheme.onSurfaceVariant
@@ -934,7 +1005,16 @@ class MainActivity : ComponentActivity() {
         appendLine("Last start: ${fullTime(status.lastReaderStart)}")
         appendLine("Last log: ${fullTime(status.lastSuccessfulLogLine)}")
         appendLine("Last FCM: ${fullTime(status.lastFcm)}")
-        append("Failure: ${status.lastReaderFailureType ?: "none"}")
+        appendLine("Failure: ${status.lastReaderFailureType ?: "none"}")
+        val evidence = status.activityEvidence
+        appendLine("Activity child alive: ${evidence.childAlive}")
+        appendLine("Activity reader: ${evidence.state.name}")
+        appendLine("Activity running: ${evidence.running}")
+        appendLine("Activity event verified: ${evidence.eventDeliveryVerified}")
+        appendLine("Last system event: ${fullTime(evidence.lastEventRead)}")
+        appendLine("Last visible main WeChat: ${fullTime(evidence.lastMainWeChatVisible)}")
+        appendLine("Last confirmed cancellation: ${fullTime(evidence.lastCancellationConfirmed)}")
+        LogPropertyManager.state.value.checks.forEach { appendLine("${it.property.propertyName}: ${it.state.name}") }
     }
 
     private companion object {

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import com.largebatata.fcmhelper.logconfig.LogPropertyManager
 import com.largebatata.fcmhelper.wake.WakeUiState
 import java.io.File
 import java.text.SimpleDateFormat
@@ -43,6 +44,19 @@ class DiagnosticExporter(private val context: Context) {
             writer.appendLine("Last reader activity: ${displayTimestamp(status.lastSuccessfulLogLine)}")
             writer.appendLine("Last reader exit code: ${status.lastReaderExitCode ?: "NONE"}")
             writer.appendLine("Last reader failure: ${status.lastReaderFailureType ?: "NONE"}")
+            writer.appendLine("Last valid FCM log: ${displayTimestamp(status.lastMatchedLog)}")
+            val evidence = status.activityEvidence
+            writer.appendLine("Activity child alive: ${evidence.childAlive}")
+            writer.appendLine("Activity child PID: ${evidence.pid ?: "NONE"}")
+            writer.appendLine("Activity reader state: ${evidence.state.name}")
+            writer.appendLine("Activity reader running: ${evidence.running}")
+            writer.appendLine("Activity event delivery verified: ${evidence.eventDeliveryVerified}")
+            writer.appendLine("Last system event read: ${displayTimestamp(evidence.lastEventRead)}")
+            writer.appendLine("Last main WeChat visible: ${displayTimestamp(evidence.lastMainWeChatVisible)}")
+            writer.appendLine("Last alert cancellation confirmed: ${displayTimestamp(evidence.lastCancellationConfirmed)}")
+            LogPropertyManager.state.value.checks.forEach {
+                writer.appendLine("${it.property.propertyName}: ${it.state.name} (expected ${it.property.expected})")
+            }
             writer.appendLine("Last WeChat FCM: ${displayTimestamp(status.lastFcm)}")
             writer.appendLine("Recent event: ${status.recentEvent?.name ?: "NONE"}")
             writer.appendLine("Shizuku installed: ${wake.installed}")

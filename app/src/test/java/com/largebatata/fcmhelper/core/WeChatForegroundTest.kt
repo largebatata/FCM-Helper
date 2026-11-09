@@ -15,7 +15,59 @@ class WeChatForegroundTest {
 
     private fun setResumed(user: Int, component: String = "com.tencent.mm/.ui.LauncherUI") =
         "1788977207.469 1777 3830 I wm_set_resumed_activity: " +
-            "[$user,$component,minimalResumeActivityLocked,0]"
+            "[$user,$component,minimalResumeActivityLocked]"
+
+    @Test
+    fun eachEventHasItsOwnFieldLayout() {
+        val resumeEvent = WeChatForegroundParser.parse(resume(0))!!
+        val setEvent = WeChatForegroundParser.parse(setResumed(0))!!
+        assertEquals(1788977207469L, resumeEvent.timestampMillis)
+        assertEquals(resumeEvent.componentName, setEvent.componentName)
+        assertEquals(0, setEvent.userId)
+        assertNull(WeChatForegroundParser.parse(setResumed(0).replace("]", ",0]")))
+        assertNull(WeChatForegroundParser.parse(resume(0).replace(",48172", "")))
+        assertNull(WeChatForegroundParser.parse(resume(0).replace("]", ",extra]")))
+    }
+
+    @Test
+    fun malformedAndEmptyFieldsNeverBecomeForegroundEvidence() {
+        val samples = listOf(
+            "wm_resume_activity: [0,token,,com.tencent.mm/.ui.LauncherUI]",
+            "wm_resume_activity: [0,,48172,com.tencent.mm/.ui.LauncherUI]",
+            "wm_resume_activity: [0,token,48172,]",
+            "wm_resume_activity: [,token,48172,com.tencent.mm/.ui.LauncherUI]",
+            "wm_set_resumed_activity: [0,com.tencent.mm/.ui.LauncherUI,]",
+            "wm_set_resumed_activity: [0, ,reason]",
+            "wm_set_resumed_activity: [,com.tencent.mm/.ui.LauncherUI,reason]",
+            "wm_set_resumed_activity: [-1,com.tencent.mm/.ui.LauncherUI,reason]",
+            "wm_set_resumed_activity: [overflow,com.tencent.mm/.ui.LauncherUI,reason]",
+            "wm_set_resumed_activity: [0,com.tencent.mm/.ui.LauncherUI,reason",
+        )
+        samples.forEach { assertNull(it, WeChatForegroundParser.parse("1788977207.469 1777 3830 I $it")) }
+        assertNull(WeChatForegroundParser.parse(setResumed(0).replace("1788977207.469", "invalid")))
+        assertNull(WeChatForegroundParser.parse(setResumed(0).replace("1788977207.469", "999999999999999999999")))
+    }
+
+    @Test
+    fun invalidPackagesAndComponentsAreRejectedForBothTags() {
+        for (component in listOf(
+            "com..tencent.mm/.ui.LauncherUI", "com.tencent.mm:push/.ui.LauncherUI",
+            "com.tencent.mm bad/.ui.LauncherUI", "com.tencent.mm/", "com.tencent.mm/.",
+            "com.tencent.mm/.ui/LauncherUI", "/.ui.LauncherUI", "com.tencent.mm/.9Bad",
+        )) {
+            assertNull(component, WeChatForegroundParser.parse(resume(0, component)))
+            assertNull(component, WeChatForegroundParser.parse(setResumed(0, component)))
+        }
+    }
+
+    @Test
+    fun optionalSpacesFullClassNamesAndMicrosecondTimestampsAreAccepted() {
+        val line = "1788977207.469123 1777 3830 I wm_set_resumed_activity: " +
+            "[ 0 , com.tencent.mm/com.tencent.mm.ui.LauncherUI , reason ]"
+        val event = WeChatForegroundParser.parse(line)!!
+        assertEquals(1788977207469L, event.timestampMillis)
+        assertTrue(WeChatForegroundParser.isMainWeChat(event))
+    }
 
     @Test
     fun userZeroAnyWeChatActivityMatches() {

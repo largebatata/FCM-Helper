@@ -1,6 +1,7 @@
 package com.largebatata.fcmhelper
 
 import android.app.Application
+import com.largebatata.fcmhelper.logconfig.LogPropertyManager
 import com.largebatata.fcmhelper.wake.EnhancedWakeManager
 
 class HelperApplication : Application() {
@@ -9,5 +10,6 @@ class HelperApplication : Application() {
         ReaderDiagnostics(this).record("APP_PROCESS_START")
         EventHistoryRepository.initialize(this)
         EnhancedWakeManager.initialize(this)
+        LogPropertyManager.initialize(this)
     }
 }
